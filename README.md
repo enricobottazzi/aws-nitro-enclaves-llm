@@ -15,12 +15,12 @@ User data, including PII, PHI, and questions, remains encrypted throughout the r
 3. The client app receives the POST request and forwards it through a secure local channel (for example, vsock) to the server app running inside Nitro Enclaves.
 
 4. The Nitro Enclaves server app uses the temporary credentials to decrypt the request, queries the LLM, and generates the response. The model-specific settings are stored within the enclaves and are protected with cryptographic attestation.
+
 5. The server app uses the same temporary credentials to encrypt the response.
 
 6. The encrypted response is returned back to the chatbot app through the client app as a response from the POST request.
 
 7. The chatbot app decrypts the response using their KMS key and displays the plaintext to the user.
-
 
 ## Environment Setup
 
@@ -37,7 +37,7 @@ User data, including PII, PHI, and questions, remains encrypted throughout the r
 6.	Input a key alias (this will be used later in the chatbot application). Add a description and tag your resources to associate them to this project.
 7.	Defining key administrative permissions is optional.
 8.	Defining key usage permissions is necessary, as the KMS key policy must give your IAM user key usage permissions.
-9.	Review the key configurations and click finish.
+9.	Review the key configurations and click finish. Note the KMS key ID.
 
 # Create an EC2 Instance Role
 1.	Navigate to the AWS IAM console by searching for “IAM” in the AWS Management Console search bar.
@@ -47,16 +47,6 @@ User data, including PII, PHI, and questions, remains encrypted throughout the r
 5.	On the “Name, review, and create” page, enter a role name. Add a description and tag to associate this IAM role to the project.
 6.	Choose “Create role”.
 
-# Create an AWS Cloud9 Environment
-1.	Navigate to the AWS Cloud9 console by searching for "Cloud9" in the AWS Management Console search bar.
-2.	Click “Create environment”.
-3.	Provide an environment name and select “New EC2 instance”.
-4.	Select any instance type.
-5.	Under network settings, expand the “VPC settings”.
-6.	Select the VPC and Subnet that are associated with the EC2 created above if they were built.
-7.	Click “Create”.
-8.	Attach the EC2 instance role to the Cloud 9 EC2 Instance
-9.	Disable AWS managed temporary credentials from the Cloud9 settings
 
 # Launch EC2 Instance
 1.	Navigate to the Amazon EC2 by searching for “EC2” in the AWS Management Console search bar.
@@ -66,59 +56,65 @@ a.	For this demo, we are using the amzn2-ami-kernel-5.10-hvm-2.0.20230628.0-x86_
 4.	Select instance type.
 a.	LLMs are very CPU- and memory-intensive. For this demo, we are using an r5.8xlarge instance.
 5.	Configure key pair and network settings appropriately.
-6.	Configure storage.
+6.	Configure storage (I set 80GB).
 a.	LLMs are very large, so ensure that there is plenty of storage so you can load and save the model directly on the EC2 instance.
 7.	Use the "Advanced details" dropdown to enable Nitro Enclaves.
 8.	Once the instance is running, select the instance ID and navigate to the connect button at the top for ways to connect to your instance.
+9.  Attach the EC2 instance role to the EC2 instance by choosing "Actions -> Security -> Modify IAM role" and select the role you created in the previous steps.
 
 # EC2 Instance Configuration
 Now that the EC2 instance is running and you have connected to your instance, use the following steps to configure the necessary Nitro Enclave tools:
-1.	Install the Nitro Enclaves CLI to build and run Nitro Enclave applications:
-` sudo amazon-linux-extras install aws-nitro-enclaves-cli -y `
-` sudo yum install aws-nitro-enclaves-cli-devel -y `
-2.	Verify installation of the Nitro Enclaves CLI:
-` nitro-cli --version `
-3.	Install Git and Docker to build docker images and download the application from GitHub. Add your instance user to the docker group (<USER> is your IAM instance user):
+1. Follow the steps (1-5) contained here: https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html to install the Nitro Enclaves CLI.
+2. Install pip, Git and Docker to build docker images and download the application from GitHub. Add your instance user to the docker group (<USER> is your IAM instance user):
+` sudo yum install python3-pip -y `
 ` sudo yum install git -y `
-` sudo usermod -aG ne <USER> `
-` sudo usermod -aG docker <USER> `
 ` sudo systemctl start docker && sudo systemctl enable docker `
-4.	Start and enable the AWS Nitro Enclave allocator and vsock proxy services:
+3.	Start and enable the AWS Nitro Enclave allocator and vsock proxy services:
 ` sudo systemctl start nitro-enclaves-allocator.service && sudo systemctl enable nitro-enclaves-allocator.service `
-` Sudo systemctl start nitro-enclaves-vsock-proxy.service && sudo systemctl enable nitro-enclaves-vsock-proxy.service `
+` sudo systemctl start nitro-enclaves-vsock-proxy.service && sudo systemctl enable nitro-enclaves-vsock-proxy.service `
 AWS Nitro Enclaves use a local socket connection called vsock to create a secure channel between the parent instance and the enclave.
-5.	Once all the services are started and enabled, restart the instance to ensure all user groups and services are running correctly.
+4.	Once all the services are started and enabled, restart the instance to ensure all user groups and services are running correctly.
 ` sudo shutdown -r now `
 
-#Nitro Enclave Allocator Service
+# Nitro Enclave Allocator Service
 AWS Nitro Enclaves are an isolated environment that designates a portion of the instance CPU and memory to run the enclave. Using the Nitro Enclave allocator service, users can indicate how many CPUs and how much memory will be taken from the parent instance to run the enclave.
 1.	Modify the enclaves reserved resources using any text editor (for our solution we allocate 8 CPU and 70000 MiB memory to ensure enough resources):
-` vi /etc/nitro_enclaves/allocator.yaml `
-
+` sudo nano /etc/nitro_enclaves/allocator.yaml `
+2.	After editing the `cpu_count` value (and/or `memory_mib`), restart and enable the nitro-enclaves-allocator service to apply the changes:
+` sudo systemctl restart nitro-enclaves-allocator.service && sudo systemctl enable nitro-enclaves-allocator.service `
+Note: The `enable` command ensures the service starts automatically on boot. The `restart` command applies your configuration changes immediately.
 
 # Clone the Project
 Once the EC2 instance is configured, you can download the code that will be used to run the sensitive chatbot with an LLM inside of a Nitro Enclave:
 Note: You need to update the server.py file with the appropriate KMS key id that was created in the beginning to encrypt the LLM response.
 1.	Clone the GitHub project:
-cd ~/ && git clone https://<THE_REPO.git>
+git clone https://<THE_REPO.git>
 2.	Navigate to the project folder to build the “enclave_base” docker image that contains the Nitro Enclaves Software Development Kit (SDK) for cryptographic attestation documents from the Nitro Hypervisor (this step can take upwards to 15 minutes):
-` cd /nitro_llm/enclave_base `
-` docker build ./ -t “enclave_base” `
+` cd /aws-nitro-enclaves-llm/src/enclave_base `
+` docker build ./ -t enclave_base `
 
 # Save the LLM in the EC2 Instance
 We are using the open-source Bloom 560m large language model (LLM) for natural language processing to generate responses. This model is not fine-tuned to PII/PHI but demonstrates how a LLM can live inside of a Nitro Enclave. The model also needs to be saved on the parent instance so that it can be copied into the enclave via the Dockerfile.
 1.	Navigate to the project:
-` cd /nitro_llm `
+` cd /aws-nitro-enclaves-llm/src/enclave `
 2.	Install the necessary requirements to save the model locally:
-` pip3 install requirements.txt `
+` pip3 install -r requirements.txt `
 3.	Run the save_model.py app to save the model within the /nitro_llm/enclave/bloom directory:
 ` python3 save_model.py `
 
 # Build and Run the Nitro Enclave Image
 To run Nitro Enclaves, an enclave image file (EIF) needs to be created from a docker image of your application. The Dockerfile located in the enclave directory contains the files, code, and LLM that will run inside of the enclave.
-Note: Building and running the enclave will take multiple minutes to complete.
-1.	Navigate to the root of the project:
-` cd /nitro_llm `
+
+0. Update the KMS_KEY_ID in the Dockerfile to the KMS key ID that was created in the environment setup steps.
+```
+ENV KMS_KEY_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+1. Build the application docker image:
+``` 
+cd /aws-nitro-enclaves-llm/src/enclave 
+docker build ./ -t enclave 
+```
 
 2.	Build the enclave image file as enclave.eif
 ` nitro-cli build-enclave --docker-uri enclave:latest --output-file enclave.eif `
@@ -132,206 +128,111 @@ Note: You need to allocate at least 4 times the EIF file size. This can be modif
 4.	You can verify the enclave is running with the command below:
 ` nitro-cli describe-enclaves `
 
-
 # Update the KMS Key Policy
-1.	Navigate to the Amazon KMS by searching for “KMS” in the AWS Management Console search bar.
-2.	Go to “Customer managed keys” located on the left tab.
+1.	Navigate to the Amazon KMS by searching for "KMS" in the AWS Management Console search bar.
+2.	Go to "Customer managed keys" located on the left tab.
 3.	Search for the key that you generated in the environment setup steps.
-4.	Click “Edit” on the “Key policy”.
-5.	Update the key policy with:
-•	Your Account ID
-•	Your IAM User Name
-•	Updated Cloud9 Environment Instance Role
-•	Actions kms:Encrypt and kms:Decrypt
-•	Add enclave PCRs (e.g. “PCR0, PCR1, PCR2”) to your key policy with a condition statement
-
+4.	Click "Edit" on the "Key policy".
+5.	Update the key policy with the enclave permissions:
 ~~~~
 {
     "Version": "2012-10-17",
     "Id": "key-default-1",
     "Statement": [
-        {
-            "Sid": "Enable User permissions",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::<accountID>:user/<iamuser>"
-            },
-            "Action": "kms:*",
-            "Resource": [
-                "kms:CreateAlias", 
-                "kms:CreateKey", 
-                "kms:DeleteAlias", 
-                "kms:Describe*", 
-                "kms:GenerateRandom", 
-                "kms:Get*", 
-                "kms:List*", 
-                "kms:TagResource", 
-                "kms:UntagResource", 
-                "iam:ListGroups", 
-                "iam:ListRoles", 
-                "iam:ListUsers"
-            ]
-        },
+        ...
         {
             "Sid": "Enable Enclave permissions",
             "Effect": "Allow",
             "Principal": {
-                "AWS": "arn:aws:iam::<accountID>:role/<cloud9instancerole>"
+                "AWS": "arn:aws:iam::<accountID>:role/<ec2instancerole>"
             },
             "Action": [
                 "kms:Encrypt",
                 "kms:Decrypt"
             ],
             "Resource": "*",
-                "Condition": {
-                    "StringEqualsIgnoreCase": {
-                        "kms:RecipientAttestation:PCR0": "<PCR0>",
-                        "kms:RecipientAttestation:PCR1": "<PCR1>",
-                        "kms:RecipientAttestation:PCR2": "<PCR2>",
-              }
+            "Condition": {
+                "StringEqualsIgnoreCase": {
+                    "kms:RecipientAttestation:PCR0": "<PCR0>",
+                    "kms:RecipientAttestation:PCR1": "<PCR1>",
+                    "kms:RecipientAttestation:PCR2": "<PCR2>"
+                }
+            }
         }
     ]
 }
 ~~~~
 
-# Save the Chatbot App
-To mimic a sensitive query chatbot application that lives outside of the AWS account, the chatbot.py app needs to be saved and run inside of the Cloud9 environment. Your Cloud9 environment will use its instance role for temporary credentials to disassociate permissions from the EC2 running the enclave.
+# Run the Client App
+1. Navigate to `aws-nitro-enclaves-llm/src`
+2. Install the dependencies:
+` pip3 install flask `
+3. Run the client.py file:
+` python client.py `
 
-1.	Navigate to the AWS Cloud9 console by searching for "Cloud9" in the AWS Management Console search bar.
-2.	Click “Open” next to your Cloud9 environment that was created in the begging setup steps.
-3.	Copy the code below into a new file like “chatbot.py” into the main directory.
-4.	Install required modules below:
+# Run the Simple Client (Plaintext Mode)
+The simple client allows you to send plaintext prompts directly from the EC2 instance to the enclave without encryption/decryption. This is useful for testing and development scenarios where encryption is not required.
+
+1. Navigate to `aws-nitro-enclaves-llm/src`
+2. The simple client uses only standard library modules (no additional dependencies required)
+3. Run the simple_client.py file:
+   - Interactive mode: ` python3 simple_client.py `
+   - With command line prompt: ` python3 simple_client.py "Your prompt here" `
+4. The client will:
+   - Automatically detect the running enclave CID
+   - Send the plaintext prompt via vsock to the enclave
+   - Log the response to both console and `simple_client.log` file
+5. The enclave server automatically detects plaintext requests (when `mode: "plaintext"` is present) and processes them without encryption/decryption
+
+Note: The simple client communicates directly with the enclave via vsock, bypassing the Flask server in `client.py`. The enclave server supports both encrypted (original) and plaintext (new) request modes.
+
+# Run the Simple Server (Inside Enclave)
+The `simple_server.py` is a simplified version of the enclave server that only handles plaintext requests without encryption/decryption or KMS dependencies. This is useful for testing and development when you don't need encryption.
+
+To use the simple server instead of the full server:
+
+1. **Option 1: Modify the Dockerfile**
+   - Add `COPY simple_server.py ./` to the Dockerfile before the `CMD` line
+   - Modify `run.sh` to use `python3.8 /app/simple_server.py` instead of `python3.8 /app/server.py`
+
+2. **Option 2: Create a separate run script**
+   - Create a `run_simple.sh` script similar to `run.sh` but calling `simple_server.py`
+   - Update the Dockerfile `CMD` to use the new script
+
+3. **Rebuild the enclave image:**
+   ```bash
+   cd /aws-nitro-enclaves-llm/src/enclave
+   docker build ./ -t enclave
+   nitro-cli build-enclave --docker-uri enclave:latest --output-file enclave.eif
+   ```
+
+4. **Run the enclave with the simple server:**
+   ```bash
+   nitro-cli run-enclave --cpu-count 8 --memory 70000 --enclave-cid 16 --eif-path enclave.eif
+   ```
+
+**Key differences from `server.py`:**
+- No KMS encryption/decryption
+- No boto3 dependencies (simpler, faster startup)
+- Only handles plaintext requests
+- Same vsock port (5000) and protocol
+- Compatible with `simple_client.py`
+
+**Note:** The simple server does not require KMS_KEY_ID environment variable or AWS credentials, making it ideal for development and testing scenarios.
+
+# Save the Chatbot App
+To mimic a sensitive query chatbot application that lives outside of the AWS account, run the `chat.py` locally on your machine.
+
+1. Install required modules below:
 ` pip install boto3 `
 ` pip install requests `
-5.	In the EC2 console grab the IP associated with your Nitro Enclave instance.
-6.	Update the url variable in main http://<ec2instanceIP>:5001
-chatbot.py
+2. Update the KMS_ALIAS and the EC2 instance public IP in the chat.py file with the appropriate values.
+3. Run the chat.py file:
+` python chat.py `
 
-~~~~
-"""
-Modules for a basic chatbot like application and AWS communications
-"""
-import base64
-import requests
-import boto3
+NOTE: At this point I had to Grant KMS Permissions to Encrypt and Decrypt to my user 
 
-
-def get_identity_document():
-    """
-    Get identity document for current EC2 Host
-    """
-    identity_doc = requests.get(
-        "http://169.254.169.254/latest/dynamic/instance-identity/document", timeout=30)
-    return identity_doc
-
-def get_region(identity):
-    """
-    Get account of current instance identity
-    """
-    region = identity.json()["region"]
-    return region
-
-def get_account(identity):
-    """
-    Get account of current instance identity
-    """
-    account = identity.json()["accountId"]
-    return account
-
-def set_identity():
-    """
-    Set region and account for KMS
-    """
-    identity = get_identity_document()
-    region = get_region(identity)
-    account = get_account(identity)
-    return region, account
-
-def prepare_server_request(ciphertext):
-    """
-    Get the AWS credential from EC2 instance metadata
-    """
-    instance_prof = requests.get(
-        "http://169.254.169.254/latest/meta-data/iam/security-credentials/", timeout=30)
-    instance_profile_name = instance_prof.text
-
-    instance_prof_json = requests.get(
-        f"http://169.254.169.254/latest/meta-data/iam/security-credentials/{instance_profile_name}",
-        timeout=30)
-    response = instance_prof_json.json()
-
-    credential = {
-        'access_key_id': response['AccessKeyId'],
-        'secret_access_key': response['SecretAccessKey'],
-        'token': response['Token'],
-        'region': REGION,
-        'ciphertext': ciphertext
-    }
-    return credential
-
-
-def get_user_input():
-    """
-    Start chatbot to collect user input
-    """
-    print("Chatbot: Hello! How can I assist you?")
-    user_input = input('Your Question: ')
-    return user_input.lower()
-
-def encrypt_string(user_input, alias, kms):
-    """
-    Encrypt user input using AWS KMS
-    """
-    file_contents = user_input
-    encrypted_file = kms.encrypt(KeyId=f'alias/{alias}', Plaintext=file_contents)
-    encrypted_file_contents = encrypted_file[u'CiphertextBlob']
-    encrypted_file_contents_base64 = base64.b64encode(encrypted_file_contents)
-    return encrypted_file_contents_base64.decode()
-
-def decrypt_data(encrypted_data, kms):
-    """
-    Decrypt the LLM response using AWS KMS
-    """
-    try:
-        ciphertext_blob = base64.b64decode(encrypted_data)
-        response = kms.decrypt(CiphertextBlob=ciphertext_blob)
-        decrypted_data = response['Plaintext'].decode()
-        return decrypted_data
-    except ImportError as e_decrypt:
-        print("Decryption failed:", e_decrypt)
-        return None
-
-REGION, ACCOUNT = set_identity()
-
-
-def main():
-    """
-    Main function to encrypt/decrypt data and send/receive with parent instance
-    """
-    kms = boto3.client('kms', region_name=REGION)
-    alias = "ncsnitro"
-
-
-    user_input = get_user_input()
-    encrypted_input = encrypt_string(user_input, alias, kms)
-
-    server_request = prepare_server_request(encrypted_input)
-
-    url = ''
-    x = requests.post(url, json = server_request)
-    response_body = x.json()
-
-    llm_response = decrypt_data(response_body["EncryptedData"], kms)
-    print(llm_response)
-
-if __name__ == '__main__':
-    main()
-~~~~
-
-7.	Run the chatbot application:
-` python3 chat.py `
-
-8.	Once running, the terminal will ask for the user input and follow the architectural diagram from above to generate a secure response.
+4.	Once running, the terminal will ask for the user input and follow the architectural diagram from above to generate a secure response.
 
 # Running the Private Question and Answer Chatbot
 
