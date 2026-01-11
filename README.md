@@ -117,7 +117,7 @@ docker build ./ -t enclave
 When the enclave is built, a series of unique hashes and platform configuration registers (PCRs) will be created. The PCRs are a contiguous measurement to prove the identity of the hardware and application. These PCRs will be required for cryptographic attestation and used during the KMS key policy update section below.
 
 3.	Run the enclave with the resources from the allocator.service (adding the --attach-console argument at the end will run the enclave in debug mode):
-` nitro-cli run-enclave --cpu-count 8 --memory 70000 --enclave-cid 16 --eif-path enclave.eif `
+` nitro-cli run-enclave --cpu-count 8 --memory 70000 --enclave-cid 16 --eif-path enclave.eif --debug-mode`
 Note: You need to allocate at least 4 times the EIF file size. This can be modified in the allocator.service from pervious steps.
 
 4.	You can verify the enclave is running with the command below:
@@ -162,8 +162,17 @@ Note: You need to allocate at least 4 times the EIF file size. This can be modif
 1. Navigate to `aws-nitro-enclaves-llm/src`
 2. Run the client.py file:
 ` python client.py `
+3. Read the prompt
+```
+[ec2-user@ip-172-31-39-204 src]$ python3 client.py
+Sending prompt: explain what hello world means
+{
+    "Results": "explain what hello world means, and how it relates to our daily lives and the rest of the"
+}
+Response: {'Results': 'explain what hello world means, and how it relates to our daily lives and the rest of the'}
+```
 
-# Save the Chatbot App
+# Save the Chatbot App (NO)
 To mimic a sensitive query chatbot application that lives outside of the AWS account, run the `chat.py` locally on your machine.
 
 1. Install required modules below:
@@ -177,7 +186,7 @@ NOTE: At this point I had to Grant KMS Permissions to Encrypt and Decrypt to my 
 
 4.	Once running, the terminal will ask for the user input and follow the architectural diagram from above to generate a secure response.
 
-# Running the Private Question and Answer Chatbot
+# Running the Private Question and Answer Chatbot (NO)
 
 Now that the Nitro Enclave is up and running on the EC2 instance, you should be able to ask your chatbot PHI/PII questions. Here’s an example:
 Within the Cloud9 IDE we ask our chatbot this question:
