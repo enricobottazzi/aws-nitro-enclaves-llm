@@ -24,11 +24,7 @@ User data, including PII, PHI, and questions, remains encrypted throughout the r
 
 ## Environment Setup
 
-# Before we get started, you will need the following prerequisites to deploy the solution:
-1.	AWS account
-2.	AWS Identity and Access Management (IAM) user
-
-# Create an AWS KMS CMK
+# Create an AWS KMS CMK (NO)
 1.	Log in to the AWS Management Console and select the AWS region where you’d like to deploy these resources.
 2.	Navigate to the AWS KMS by searching for “KMS” in the AWS Management Console search bar.
 3.	Go to “Customer managed keys” located on the left tab.
@@ -39,14 +35,13 @@ User data, including PII, PHI, and questions, remains encrypted throughout the r
 8.	Defining key usage permissions is necessary, as the KMS key policy must give your IAM user key usage permissions.
 9.	Review the key configurations and click finish. Note the KMS key ID.
 
-# Create an EC2 Instance Role
+# Create an EC2 Instance Role (NO)
 1.	Navigate to the AWS IAM console by searching for “IAM” in the AWS Management Console search bar.
 2.	In the navigation pane, choose “Roles” and then choose “Create role”.
 3.	Select “AWS service” under the “Trusted entity type”.
 4.	From the “Use case” dropdown, select EC2.
 5.	On the “Name, review, and create” page, enter a role name. Add a description and tag to associate this IAM role to the project.
 6.	Choose “Create role”.
-
 
 # Launch EC2 Instance
 1.	Navigate to the Amazon EC2 by searching for “EC2” in the AWS Management Console search bar.
@@ -105,7 +100,7 @@ We are using the open-source Bloom 560m large language model (LLM) for natural l
 # Build and Run the Nitro Enclave Image
 To run Nitro Enclaves, an enclave image file (EIF) needs to be created from a docker image of your application. The Dockerfile located in the enclave directory contains the files, code, and LLM that will run inside of the enclave.
 
-0. Update the KMS_KEY_ID in the Dockerfile to the KMS key ID that was created in the environment setup steps.
+0. Update the KMS_KEY_ID in the Dockerfile to the KMS key ID that was created in the environment setup steps. (NO)
 ```
 ENV KMS_KEY_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
@@ -128,7 +123,7 @@ Note: You need to allocate at least 4 times the EIF file size. This can be modif
 4.	You can verify the enclave is running with the command below:
 ` nitro-cli describe-enclaves `
 
-# Update the KMS Key Policy
+# Update the KMS Key Policy (NO)
 1.	Navigate to the Amazon KMS by searching for "KMS" in the AWS Management Console search bar.
 2.	Go to "Customer managed keys" located on the left tab.
 3.	Search for the key that you generated in the environment setup steps.
@@ -163,62 +158,10 @@ Note: You need to allocate at least 4 times the EIF file size. This can be modif
 }
 ~~~~
 
-# Run the Client App
+# Run the Client App 
 1. Navigate to `aws-nitro-enclaves-llm/src`
-2. Install the dependencies:
-` pip3 install flask `
-3. Run the client.py file:
+2. Run the client.py file:
 ` python client.py `
-
-# Run the Simple Client (Plaintext Mode)
-The simple client allows you to send plaintext prompts directly from the EC2 instance to the enclave without encryption/decryption. This is useful for testing and development scenarios where encryption is not required.
-
-1. Navigate to `aws-nitro-enclaves-llm/src`
-2. The simple client uses only standard library modules (no additional dependencies required)
-3. Run the simple_client.py file:
-   - Interactive mode: ` python3 simple_client.py `
-   - With command line prompt: ` python3 simple_client.py "Your prompt here" `
-4. The client will:
-   - Automatically detect the running enclave CID
-   - Send the plaintext prompt via vsock to the enclave
-   - Log the response to both console and `simple_client.log` file
-5. The enclave server automatically detects plaintext requests (when `mode: "plaintext"` is present) and processes them without encryption/decryption
-
-Note: The simple client communicates directly with the enclave via vsock, bypassing the Flask server in `client.py`. The enclave server supports both encrypted (original) and plaintext (new) request modes.
-
-# Run the Simple Server (Inside Enclave)
-The `simple_server.py` is a simplified version of the enclave server that only handles plaintext requests without encryption/decryption or KMS dependencies. This is useful for testing and development when you don't need encryption.
-
-To use the simple server instead of the full server:
-
-1. **Option 1: Modify the Dockerfile**
-   - Add `COPY simple_server.py ./` to the Dockerfile before the `CMD` line
-   - Modify `run.sh` to use `python3.8 /app/simple_server.py` instead of `python3.8 /app/server.py`
-
-2. **Option 2: Create a separate run script**
-   - Create a `run_simple.sh` script similar to `run.sh` but calling `simple_server.py`
-   - Update the Dockerfile `CMD` to use the new script
-
-3. **Rebuild the enclave image:**
-   ```bash
-   cd /aws-nitro-enclaves-llm/src/enclave
-   docker build ./ -t enclave
-   nitro-cli build-enclave --docker-uri enclave:latest --output-file enclave.eif
-   ```
-
-4. **Run the enclave with the simple server:**
-   ```bash
-   nitro-cli run-enclave --cpu-count 8 --memory 70000 --enclave-cid 16 --eif-path enclave.eif
-   ```
-
-**Key differences from `server.py`:**
-- No KMS encryption/decryption
-- No boto3 dependencies (simpler, faster startup)
-- Only handles plaintext requests
-- Same vsock port (5000) and protocol
-- Compatible with `simple_client.py`
-
-**Note:** The simple server does not require KMS_KEY_ID environment variable or AWS credentials, making it ideal for development and testing scenarios.
 
 # Save the Chatbot App
 To mimic a sensitive query chatbot application that lives outside of the AWS account, run the `chat.py` locally on your machine.
